@@ -98,6 +98,9 @@ class MediaKitPlayer extends AudioPlayerPlatform {
         if (_processingState == ProcessingStateMessage.loading) {
           if (!isBuffering && _mediaOpened) {
             _processingState = ProcessingStateMessage.ready;
+            if (_duration == null) {
+              _updateDuration(_player.state.duration);
+            }
             if (_loadCompleter?.isCompleted != true) {
               _loadCompleter?.complete(_duration);
             }
@@ -172,11 +175,13 @@ class MediaKitPlayer extends AudioPlayerPlatform {
         _logger.severe('ERROR OCCURRED: $error');
       }),
       _player.stream.playlist.listen((playlist) {
+        // replacing the playlist passes through other songs' indices
+        if (_processingState == ProcessingStateMessage.loading) return;
         if (_currentIndex != playlist.index) {
           _bufferedPosition = _position = Duration.zero;
           _currentIndex = playlist.index;
+          _duration = _currentMedia?.extras?['overrideDuration'];
         }
-        _duration = _currentMedia?.extras?['overrideDuration'];
         _updatePlaybackEvent();
       }),
       _player.stream.playlistMode.listen((playlistMode) {
@@ -266,7 +271,14 @@ class MediaKitPlayer extends AudioPlayerPlatform {
           index: _currentIndex);
       _loadingUri = playable.medias[_currentIndex].uri;
 
-      await _player.open(playable, play: _playing);
+      // mpv pauses itself after the last song, and only open() undoes that
+      final state = _player.state;
+      if (state.playlist.medias.isEmpty || state.completed) {
+        await _player.open(playable, play: _playing);
+      } else {
+        // open() stops mpv, which makes windows clip the next song's start
+        await _replacePlaylist(playable);
+      }
     } else {
       final playable =
           _convertAudioSourceIntoMediaKit(request.audioSourceMessage);
@@ -283,6 +295,21 @@ class MediaKitPlayer extends AudioPlayerPlatform {
     _updatePlaybackEvent();
     final duration = await _loadCompleter?.future;
     return LoadResponse(duration: duration);
+  }
+
+  Future<void> _replacePlaylist(Playlist playlist) async {
+    final old = _player.state.playlist;
+    for (var idx = old.medias.length - 1; idx >= 0; idx--) {
+      if (idx == old.index) continue;
+      await _player.remove(idx);
+    }
+    for (final media in playlist.medias) {
+      await _player.add(media);
+    }
+    // the old song keeps playing in first place until mpv jumps off it
+    _mediaOpened = true;
+    await setProperty(_player, 'playlist-pos', '${playlist.index + 1}');
+    await _player.remove(0);
   }
 
   @override
