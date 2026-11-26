@@ -342,6 +342,10 @@ class MediaKitPlayer extends AudioPlayerPlatform {
     _logger.finest('seek(${request.toMap()})');
     if (request.index != null) {
       await _player.jump(request.index!);
+      // mpv reports the new index after this returns, which just_audio would
+      // take for the song ending by itself
+      _currentIndex = request.index!;
+      _bufferedPosition = Duration.zero;
       if (!_playing) await _player.pause();
     }
 
