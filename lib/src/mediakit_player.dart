@@ -352,16 +352,15 @@ class MediaKitPlayer extends AudioPlayerPlatform {
   Future<ConcatenatingInsertAllResponse> concatenatingInsertAll(
       ConcatenatingInsertAllRequest request) async {
     // _logger.fine('concatenatingInsertAll(${request.toMap()})');
-    for (final source in request.children) {
+    // the track just added is at length - 1 (it moved
+    // from length, which doesn't exist, so nothing ever moved), and each track
+    // goes after the one before it so they keep their order
+    for (final (offset, source) in request.children.indexed) {
       await _player.add(_convertAudioSourceIntoMediaKit(source));
 
-      final length = _player.state.playlist.medias.length;
-
-      if (length == 0 || length == 1) continue;
-
-      if (request.index < (length - 1) && request.index >= 0) {
-        await _player.move(length, request.index);
-      }
+      final last = _player.state.playlist.medias.length - 1;
+      final target = request.index + offset;
+      if (target < last) await _player.move(last, target);
     }
 
     return ConcatenatingInsertAllResponse();
